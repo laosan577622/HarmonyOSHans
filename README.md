@@ -1,43 +1,86 @@
 # HarmonyOSHans
 
-HarmonyOS-Hans 的切片文件，可以部署到 CDN 上，为站点添加 HarmonyOS 字体支持。
+HarmonyOS Sans SC 的 WOFF2 字体切片，可部署到 CDN，为网页提供按字符加载的中文字体。
 
-## 使用方法
+字体包含 300、400、500、700 四个字重，每个字重分为 96 个切片。`common.css` 已为每个切片配置 `unicode-range` 与 `font-display: swap`，浏览器只会请求页面实际使用字符对应的字体文件。
 
-### 上传字体切片及CSS文件到你的网站或者其他CDN服务
+## jsDelivr 使用
 
-创建HarmonyOSHans文件夹，将css文件以及font文件夹上传到HarmonyOSHans文件夹。
+### 懒加载与动态内容自动加载
 
-### 引入字体
-
-```html
-<link rel="stylesheet" href="https://yourdomain.com/HarmonyOSHans/common.css">
-```
-
-### 使用字体
-
-根据需要在 CSS 中添加 `HarmonyOSHans-Regular` 字体，本例样式中已自适应字宽。
+推荐通过 `loader.js` 接入。它会等待页面完成首屏加载，再在浏览器空闲时加载字体 CSS；初次加载后会扫描当前文本，并监听后续动态插入或修改的文本，自动请求缺失的字体切片。
 
 ```html
+<script
+  defer
+  src="https://cdn.jsdelivr.net/gh/laosan577622/HarmonyOSHans@v1.0.0/loader.js"
+></script>
+
 <style>
   body {
-    font-family: 'HarmonyOSHans-Regular', sans-serif;
+    font-family: "HarmonyOSHans-Regular", "PingFang SC", sans-serif;
   }
 </style>
 ```
 
-您也可以直接使用以下CSS代码：
-```css
-/* 字体相关css */
-@import url("https://yourdomain.com/HarmonyOSHans/common.css");
-@font-face {
-  font-family: "HarmonyOSHans-Regular", sans-serif;
-  font-weight: normal;
-  font-style: normal;
-}
-*:not([class*="icon"]):not(i) {
-  font-family: "HarmonyOSHans-Regular" !important;
-}
+加载器默认配置：
+
+- 字体 CSS：与 `loader.js` 同目录的 `common.css`
+- 字体名称：`HarmonyOSHans-Regular`
+- 字重：300、400、500、700
+- 监听范围：`body`
+- 加载时机：`window.load` 后的浏览器空闲阶段
+
+可通过 `data-*` 属性覆盖：
+
+```html
+<script
+  defer
+  src="https://cdn.jsdelivr.net/gh/laosan577622/HarmonyOSHans@v1.0.0/loader.js"
+  data-root="#app"
+  data-weights="400,500,700"
+  data-idle-timeout="800"
+></script>
 ```
 
-> 注意：需要将https://yourdomain.com/HarmonyOSHans/common.css替换成为您自己的链接
+如需手动控制加载时机：
+
+```html
+<script
+  defer
+  data-auto="false"
+  src="https://cdn.jsdelivr.net/gh/laosan577622/HarmonyOSHans@v1.0.0/loader.js"
+></script>
+<script>
+  window.addEventListener("DOMContentLoaded", function () {
+    window.HarmonyOSHans.load();
+  });
+</script>
+```
+
+动态内容通常会被 `MutationObserver` 自动识别；在批量更新结束后，也可以主动扫描指定节点：
+
+```js
+window.HarmonyOSHans.scan(document.querySelector("#article"));
+```
+
+### 仅使用原生字符分片加载
+
+如果无需延迟加载 CSS 和动态内容预加载，可直接引入：
+
+```html
+<link
+  rel="stylesheet"
+  href="https://cdn.jsdelivr.net/gh/laosan577622/HarmonyOSHans@v1.0.0/common.css"
+>
+```
+
+浏览器仍会根据 `unicode-range` 只下载页面实际字符命中的 WOFF2 分片。
+
+## 自行部署
+
+将 `common.css`、`loader.js` 和 `font/` 保持当前相对目录结构部署到同一目录。加载器会根据自身脚本地址自动解析 `common.css`，字体 CSS 再通过相对路径读取 `font/` 中的切片。
+
+## 开源许可
+
+本项目沿用原仓库的 MIT License，并保留原作者版权与提交历史。
