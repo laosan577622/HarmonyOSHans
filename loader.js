@@ -9,10 +9,12 @@
   var rootSelector = settings.root || 'body';
   var configuredWeights = parseWeights(settings.weights || '300,400,500,700');
   var useSplitStylesheets = settings.split ? settings.split !== 'false' : !settings.css;
+  var scanMode = settings.scan === 'viewport' ? 'viewport' : 'document';
   var idleTimeout = clampNumber(settings.idleTimeout, 1200, 0, 10000);
   var loadTimeout = clampNumber(settings.loadTimeout, 10000, 1000, 30000);
   var autoLoad = settings.auto !== 'false';
   var observer = null;
+  var viewportObserver = null;
   var mutationTimer = null;
   var loadPromise = null;
   var aggregateStylesheetPromise = null;
@@ -65,20 +67,33 @@
       .includes(fontFamily);
   }
 
-  function isUsableTextNode(node) {
+  function isInViewport(element) {
+    var rect = element.getBoundingClientRect();
+    return rect.width > 0
+      && rect.height > 0
+      && rect.bottom > 0
+      && rect.right > 0
+      && rect.top < window.innerHeight
+      && rect.left < window.innerWidth;
+  }
+
+  function isUsableTextNode(node, visibleOnly) {
     if (!node || !node.nodeValue || !node.nodeValue.trim()) return false;
     var parent = node.parentElement;
     if (!parent || parent.closest('script, style, noscript, template')) return false;
 
     var style = window.getComputedStyle(parent);
-    return style.display !== 'none' && style.visibility !== 'hidden' && usesFontFamily(style);
+    return style.display !== 'none'
+      && style.visibility !== 'hidden'
+      && usesFontFamily(style)
+      && (!visibleOnly || isInViewport(parent));
   }
 
-  function collectText(node, buckets) {
+  function collectText(node, buckets, visibleOnly) {
     if (!node) return;
 
     if (node.nodeType === Node.TEXT_NODE) {
-      if (!isUsableTextNode(node)) return;
+      if (!isUsableTextNode(node, visibleOnly)) return;
       var parentStyle = window.getComputedStyle(node.parentElement);
       var textWeight = closestWeight(parentStyle.fontWeight);
       buckets[textWeight] = (buckets[textWeight] || '') + node.nodeValue;
@@ -90,7 +105,7 @@
 
     var walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
     var current;
-    while ((current = walker.nextNode())) collectText(current, buckets);
+    while ((current = walker.nextNode())) collectText(current, buckets, visibleOnly);
   }
 
   function uniqueCharacters(text) {
@@ -215,9 +230,9 @@
     return Promise.all(requests);
   }
 
-  function scan(target) {
+  function scan(target, options) {
     var buckets = {};
-    collectText(target || resolveRoot(), buckets);
+    collectText(target || resolveRoot(), buckets, Boolean(options && options.visibleOnly));
     return loadTextBuckets(buckets);
   }
 
@@ -227,10 +242,53 @@
 
   function flushMutations(nodes) {
     var buckets = {};
-    nodes.forEach(function (node) { collectText(node, buckets); });
+    nodes.forEach(function (node) {
+      collectText(node, buckets, scanMode === 'viewport');
+      registerViewportCandidates(node);
+    });
     loadTextBuckets(buckets).catch(function (error) {
       console.warn('[HarmonyOSHans] Failed to preload dynamic text.', error);
     });
+  }
+
+  function registerViewportCandidates(target) {
+    if (scanMode !== 'viewport' || !viewportObserver || !target) return;
+
+    var candidates = new Set();
+    if (target.nodeType === Node.TEXT_NODE && target.parentElement) candidates.add(target.parentElement);
+    if (target.nodeType === Node.ELEMENT_NODE || target.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+      var walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+      var current;
+      while ((current = walker.nextNode())) {
+        if (current.parentElement) candidates.add(current.parentElement);
+      }
+    }
+
+    candidates.forEach(function (element) {
+      if (!element.closest('script, style, noscript, template')) viewportObserver.observe(element);
+    });
+  }
+
+  function observeViewportText() {
+    if (scanMode !== 'viewport' || viewportObserver || typeof IntersectionObserver === 'undefined') {
+      return viewportObserver;
+    }
+
+    viewportObserver = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        viewportObserver.unobserve(entry.target);
+        var buckets = {};
+        entry.target.childNodes.forEach(function (node) {
+          if (node.nodeType === Node.TEXT_NODE) collectText(node, buckets, false);
+        });
+        loadTextBuckets(buckets).catch(function (error) {
+          console.warn('[HarmonyOSHans] Failed to load visible text.', error);
+        });
+      });
+    }, { rootMargin: '160px 0px' });
+    registerViewportCandidates(resolveRoot());
+    return viewportObserver;
   }
 
   function observe() {
@@ -266,6 +324,8 @@
     mutationTimer = null;
     if (observer) observer.disconnect();
     observer = null;
+    if (viewportObserver) viewportObserver.disconnect();
+    viewportObserver = null;
   }
 
   function load(weights) {
@@ -274,8 +334,9 @@
     }
     if (loadPromise) return loadPromise;
 
-    loadPromise = scan(resolveRoot())
+    loadPromise = scan(resolveRoot(), { visibleOnly: scanMode === 'viewport' })
       .then(function () {
+        observeViewportText();
         observe();
         resolveReady(api);
         return api;
@@ -309,6 +370,7 @@
       cssUrl: cssUrl,
       family: fontFamily,
       root: rootSelector,
+      scan: scanMode,
       split: useSplitStylesheets,
       weights: configuredWeights.slice()
     },

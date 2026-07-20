@@ -6,6 +6,8 @@ HarmonyOS Sans SC 的 WOFF2 字体切片，可部署到 CDN，为网页提供按
 
 `loader.js` 会先扫描页面真正使用的字体和字重，只加载对应的 `common-300.css`、`common-400.css`、`common-500.css` 或 `common-700.css`。之后页面动态插入文本、切换 class 或调整内联字重时，会实时补载新出现的必要字重，不会预先加载全部四个字重。
 
+长页面可设置 `data-scan="viewport"`：首次只加载首屏可见文字所需字重，滚动到下方内容时通过 `IntersectionObserver` 自动补载相应字重。
+
 ## jsDelivr 使用
 
 ### 懒加载与动态内容自动加载
@@ -15,7 +17,7 @@ HarmonyOS Sans SC 的 WOFF2 字体切片，可部署到 CDN，为网页提供按
 ```html
 <script
   defer
-  src="https://cdn.jsdelivr.net/gh/laosan577622/HarmonyOSHans@v1.1.0/loader.js"
+  src="https://cdn.jsdelivr.net/gh/laosan577622/HarmonyOSHans@v1.2.0/loader.js"
 ></script>
 
 <style>
@@ -38,8 +40,9 @@ HarmonyOS Sans SC 的 WOFF2 字体切片，可部署到 CDN，为网页提供按
 ```html
 <script
   defer
-  src="https://cdn.jsdelivr.net/gh/laosan577622/HarmonyOSHans@v1.1.0/loader.js"
+  src="https://cdn.jsdelivr.net/gh/laosan577622/HarmonyOSHans@v1.2.0/loader.js"
   data-root="#app"
+  data-scan="viewport"
   data-weights="400,500,700"
   data-idle-timeout="800"
 ></script>
@@ -51,7 +54,7 @@ HarmonyOS Sans SC 的 WOFF2 字体切片，可部署到 CDN，为网页提供按
 <script
   defer
   data-auto="false"
-  src="https://cdn.jsdelivr.net/gh/laosan577622/HarmonyOSHans@v1.1.0/loader.js"
+  src="https://cdn.jsdelivr.net/gh/laosan577622/HarmonyOSHans@v1.2.0/loader.js"
 ></script>
 <script>
   window.addEventListener("DOMContentLoaded", function () {
@@ -73,7 +76,7 @@ window.HarmonyOSHans.scan(document.querySelector("#article"));
 ```html
 <link
   rel="stylesheet"
-  href="https://cdn.jsdelivr.net/gh/laosan577622/HarmonyOSHans@v1.1.0/common.css"
+  href="https://cdn.jsdelivr.net/gh/laosan577622/HarmonyOSHans@v1.2.0/common.css"
 >
 ```
 
