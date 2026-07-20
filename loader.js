@@ -8,12 +8,15 @@
   var cssUrl = settings.css || (scriptUrl ? new URL('common.css', scriptUrl).href : 'common.css');
   var rootSelector = settings.root || 'body';
   var configuredWeights = parseWeights(settings.weights || '300,400,500,700');
+  var useSplitStylesheets = settings.split ? settings.split !== 'false' : !settings.css;
   var idleTimeout = clampNumber(settings.idleTimeout, 1200, 0, 10000);
   var loadTimeout = clampNumber(settings.loadTimeout, 10000, 1000, 30000);
   var autoLoad = settings.auto !== 'false';
   var observer = null;
   var mutationTimer = null;
   var loadPromise = null;
+  var aggregateStylesheetPromise = null;
+  var weightStylesheetPromises = new Map();
   var resolveReady;
   var rejectReady;
 
@@ -23,9 +26,9 @@
   });
 
   function parseWeights(value) {
-    var parsed = String(value)
-      .split(',')
-      .map(function (weight) { return Number.parseInt(weight.trim(), 10); })
+    var source = Array.isArray(value) ? value : String(value).split(',');
+    var parsed = source
+      .map(function (weight) { return Number.parseInt(String(weight).trim(), 10); })
       .filter(function (weight) { return Number.isFinite(weight) && weight >= 100 && weight <= 900; });
 
     return parsed.length ? Array.from(new Set(parsed)).sort(function (a, b) { return a - b; }) : [400];
@@ -44,10 +47,22 @@
   function closestWeight(value) {
     var numeric = Number.parseInt(value, 10);
     if (!Number.isFinite(numeric)) numeric = value === 'bold' ? 700 : 400;
+    if (configuredWeights.includes(numeric)) return numeric;
 
     return configuredWeights.reduce(function (closest, weight) {
-      return Math.abs(weight - numeric) < Math.abs(closest - numeric) ? weight : closest;
+      var distance = Math.abs(weight - numeric);
+      var closestDistance = Math.abs(closest - numeric);
+      if (distance < closestDistance) return weight;
+      if (distance === closestDistance && numeric >= 500 && weight > closest) return weight;
+      return closest;
     }, configuredWeights[0]);
+  }
+
+  function usesFontFamily(style) {
+    return style.fontFamily
+      .split(',')
+      .map(function (family) { return family.trim().replace(/^['"]|['"]$/g, ''); })
+      .includes(fontFamily);
   }
 
   function isUsableTextNode(node) {
@@ -56,7 +71,7 @@
     if (!parent || parent.closest('script, style, noscript, template')) return false;
 
     var style = window.getComputedStyle(parent);
-    return style.display !== 'none' && style.visibility !== 'hidden';
+    return style.display !== 'none' && style.visibility !== 'hidden' && usesFontFamily(style);
   }
 
   function collectText(node, buckets) {
@@ -86,29 +101,28 @@
     return Array.from(characters).join('');
   }
 
-  function loadTextBuckets(buckets) {
-    if (!document.fonts || typeof document.fonts.load !== 'function') return Promise.resolve([]);
-
-    var requests = Object.keys(buckets).map(function (weight) {
-      var text = uniqueCharacters(buckets[weight]);
-      if (!text) return Promise.resolve([]);
-      return document.fonts.load(weight + ' 1em "' + fontFamily.replace(/"/g, '\\"') + '"', text);
-    });
-
-    return Promise.all(requests);
+  function getWeightStylesheetUrl(weight) {
+    var customUrl = script && script.getAttribute('data-css-' + weight);
+    if (customUrl) return new URL(customUrl, document.baseURI).href;
+    if (scriptUrl) return new URL('common-' + weight + '.css', scriptUrl).href;
+    return 'common-' + weight + '.css';
   }
 
-  function scan(target) {
-    var buckets = {};
-    collectText(target || resolveRoot(), buckets);
-    return loadTextBuckets(buckets);
+  function findStylesheet(weight) {
+    return document.querySelector(
+      'link[data-harmonyos-hans="stylesheet"][data-weight="' + String(weight) + '"]'
+    );
   }
 
-  function loadStylesheet() {
-    var existing = document.querySelector('link[data-harmonyos-hans="stylesheet"]');
+  function ensureAggregateStylesheet() {
+    if (aggregateStylesheetPromise) return aggregateStylesheetPromise;
+
+    var existing = document.querySelector('link[data-harmonyos-hans="stylesheet"][data-mode="aggregate"]');
     if (existing) {
-      if (existing.dataset.loaded === 'true' || existing.sheet) return Promise.resolve(existing);
-      return waitForStylesheet(existing);
+      aggregateStylesheetPromise = existing.dataset.loaded === 'true' || existing.sheet
+        ? Promise.resolve(existing)
+        : waitForStylesheet(existing);
+      return aggregateStylesheetPromise;
     }
 
     var link = document.createElement('link');
@@ -116,8 +130,43 @@
     link.href = cssUrl;
     link.crossOrigin = 'anonymous';
     link.dataset.harmonyosHans = 'stylesheet';
+    link.dataset.mode = 'aggregate';
     document.head.appendChild(link);
-    return waitForStylesheet(link);
+    aggregateStylesheetPromise = waitForStylesheet(link);
+    return aggregateStylesheetPromise;
+  }
+
+  function ensureWeightStylesheet(weight) {
+    var normalizedWeight = closestWeight(weight);
+    if (!useSplitStylesheets || aggregateStylesheetPromise) return ensureAggregateStylesheet();
+    if (weightStylesheetPromises.has(normalizedWeight)) return weightStylesheetPromises.get(normalizedWeight);
+
+    var existing = findStylesheet(normalizedWeight);
+    if (existing) {
+      var existingPromise = existing.dataset.loaded === 'true' || existing.sheet
+        ? Promise.resolve(existing)
+        : waitForStylesheet(existing);
+      weightStylesheetPromises.set(normalizedWeight, existingPromise);
+      return existingPromise;
+    }
+
+    var link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = getWeightStylesheetUrl(normalizedWeight);
+    link.crossOrigin = 'anonymous';
+    link.dataset.harmonyosHans = 'stylesheet';
+    link.dataset.mode = 'split';
+    link.dataset.weight = String(normalizedWeight);
+    document.head.appendChild(link);
+
+    var promise = waitForStylesheet(link).catch(function (error) {
+      link.remove();
+      weightStylesheetPromises.delete(normalizedWeight);
+      console.warn('[HarmonyOSHans] Split stylesheet unavailable; falling back to common.css.', error);
+      return ensureAggregateStylesheet();
+    });
+    weightStylesheetPromises.set(normalizedWeight, promise);
+    return promise;
   }
 
   function waitForStylesheet(link) {
@@ -148,6 +197,34 @@
     });
   }
 
+  function loadTextBuckets(buckets) {
+    var requests = Object.keys(buckets).map(function (weight) {
+      var normalizedWeight = closestWeight(weight);
+      var text = uniqueCharacters(buckets[weight]);
+      if (!text) return Promise.resolve([]);
+
+      return ensureWeightStylesheet(normalizedWeight).then(function () {
+        if (!document.fonts || typeof document.fonts.load !== 'function') return [];
+        return document.fonts.load(
+          normalizedWeight + ' 1em "' + fontFamily.replace(/"/g, '\\"') + '"',
+          text
+        );
+      });
+    });
+
+    return Promise.all(requests);
+  }
+
+  function scan(target) {
+    var buckets = {};
+    collectText(target || resolveRoot(), buckets);
+    return loadTextBuckets(buckets);
+  }
+
+  function loadWeight(weight) {
+    return ensureWeightStylesheet(closestWeight(weight));
+  }
+
   function flushMutations(nodes) {
     var buckets = {};
     nodes.forEach(function (node) { collectText(node, buckets); });
@@ -162,7 +239,7 @@
     var pendingNodes = new Set();
     observer = new MutationObserver(function (mutations) {
       mutations.forEach(function (mutation) {
-        if (mutation.type === 'characterData') pendingNodes.add(mutation.target);
+        if (mutation.type === 'characterData' || mutation.type === 'attributes') pendingNodes.add(mutation.target);
         mutation.addedNodes.forEach(function (node) { pendingNodes.add(node); });
       });
 
@@ -175,6 +252,8 @@
     });
 
     observer.observe(resolveRoot(), {
+      attributes: true,
+      attributeFilter: ['class', 'style'],
       childList: true,
       characterData: true,
       subtree: true
@@ -189,11 +268,13 @@
     observer = null;
   }
 
-  function load() {
+  function load(weights) {
+    if (weights !== undefined && weights !== null) {
+      return Promise.all(parseWeights(weights).map(loadWeight)).then(function () { return api; });
+    }
     if (loadPromise) return loadPromise;
 
-    loadPromise = loadStylesheet()
-      .then(function () { return scan(resolveRoot()); })
+    loadPromise = scan(resolveRoot())
       .then(function () {
         observe();
         resolveReady(api);
@@ -228,10 +309,12 @@
       cssUrl: cssUrl,
       family: fontFamily,
       root: rootSelector,
+      split: useSplitStylesheets,
       weights: configuredWeights.slice()
     },
     ready: ready,
     load: load,
+    loadWeight: loadWeight,
     scan: scan,
     observe: observe,
     disconnect: disconnect

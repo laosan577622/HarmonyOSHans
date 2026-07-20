@@ -2,7 +2,9 @@
 
 HarmonyOS Sans SC 的 WOFF2 字体切片，可部署到 CDN，为网页提供按字符加载的中文字体。
 
-字体包含 300、400、500、700 四个字重，每个字重分为 96 个切片。`common.css` 已为每个切片配置 `unicode-range` 与 `font-display: swap`，浏览器只会请求页面实际使用字符对应的字体文件。
+字体包含 300、400、500、700 四个字重，每个字重分为 96 个切片。每个切片均配置 `unicode-range` 与 `font-display: swap`。
+
+`loader.js` 会先扫描页面真正使用的字体和字重，只加载对应的 `common-300.css`、`common-400.css`、`common-500.css` 或 `common-700.css`。之后页面动态插入文本、切换 class 或调整内联字重时，会实时补载新出现的必要字重，不会预先加载全部四个字重。
 
 ## jsDelivr 使用
 
@@ -13,7 +15,7 @@ HarmonyOS Sans SC 的 WOFF2 字体切片，可部署到 CDN，为网页提供按
 ```html
 <script
   defer
-  src="https://cdn.jsdelivr.net/gh/laosan577622/HarmonyOSHans@v1.0.0/loader.js"
+  src="https://cdn.jsdelivr.net/gh/laosan577622/HarmonyOSHans@v1.1.0/loader.js"
 ></script>
 
 <style>
@@ -25,7 +27,7 @@ HarmonyOS Sans SC 的 WOFF2 字体切片，可部署到 CDN，为网页提供按
 
 加载器默认配置：
 
-- 字体 CSS：与 `loader.js` 同目录的 `common.css`
+- 字体 CSS：根据页面实际字重自动选择同目录下的 `common-<字重>.css`
 - 字体名称：`HarmonyOSHans-Regular`
 - 字重：300、400、500、700
 - 监听范围：`body`
@@ -36,7 +38,7 @@ HarmonyOS Sans SC 的 WOFF2 字体切片，可部署到 CDN，为网页提供按
 ```html
 <script
   defer
-  src="https://cdn.jsdelivr.net/gh/laosan577622/HarmonyOSHans@v1.0.0/loader.js"
+  src="https://cdn.jsdelivr.net/gh/laosan577622/HarmonyOSHans@v1.1.0/loader.js"
   data-root="#app"
   data-weights="400,500,700"
   data-idle-timeout="800"
@@ -49,7 +51,7 @@ HarmonyOS Sans SC 的 WOFF2 字体切片，可部署到 CDN，为网页提供按
 <script
   defer
   data-auto="false"
-  src="https://cdn.jsdelivr.net/gh/laosan577622/HarmonyOSHans@v1.0.0/loader.js"
+  src="https://cdn.jsdelivr.net/gh/laosan577622/HarmonyOSHans@v1.1.0/loader.js"
 ></script>
 <script>
   window.addEventListener("DOMContentLoaded", function () {
@@ -71,7 +73,7 @@ window.HarmonyOSHans.scan(document.querySelector("#article"));
 ```html
 <link
   rel="stylesheet"
-  href="https://cdn.jsdelivr.net/gh/laosan577622/HarmonyOSHans@v1.0.0/common.css"
+  href="https://cdn.jsdelivr.net/gh/laosan577622/HarmonyOSHans@v1.1.0/common.css"
 >
 ```
 
@@ -79,7 +81,9 @@ window.HarmonyOSHans.scan(document.querySelector("#article"));
 
 ## 自行部署
 
-将 `common.css`、`loader.js` 和 `font/` 保持当前相对目录结构部署到同一目录。加载器会根据自身脚本地址自动解析 `common.css`，字体 CSS 再通过相对路径读取 `font/` 中的切片。
+将 `common.css`、`common-300.css`、`common-400.css`、`common-500.css`、`common-700.css`、`loader.js` 和 `font/` 保持当前相对目录结构部署到同一目录。加载器会根据自身脚本地址自动解析按字重拆分的 CSS，字体 CSS 再通过相对路径读取 `font/` 中的切片。
+
+修改 `common.css` 后可运行 `node scripts/split-css.mjs` 重新生成四个字重入口。
 
 ## 开源许可
 
